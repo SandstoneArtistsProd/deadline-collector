@@ -1,6 +1,6 @@
 # Deadline Article Collector
 
-A Python-based RSS article collector that continuously fetches entertainment news from Deadline, Variety, and Hollywood Reporter. Features full-text extraction, smart deduplication, and CSV export capabilities.
+This is a Python-based RSS article collector that continuously fetches entertainment news from Deadline, Variety, and Hollywood Reporter. Features full-text extraction, smart deduplication, and CSV export capabilities.
 
 ## Features
 
