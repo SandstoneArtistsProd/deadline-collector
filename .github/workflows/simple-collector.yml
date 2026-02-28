@@ -2,7 +2,7 @@ name: Simple Deadline Collector
 
 on:
   schedule:
-    # Runs every hour at minute 0
+    # Runs every day at 9:00 AM UTC
     - cron: '0 9 * * *'
 
   # Allows manual run from Actions tab
@@ -11,6 +11,10 @@ on:
 jobs:
   run-collector:
     runs-on: ubuntu-latest
+
+    # Grant write permission so the action can commit back to the repo
+    permissions:
+      contents: write
 
     steps:
     # Step 1: Get your code from the repository
@@ -44,8 +48,25 @@ jobs:
       run: |
         python collector.py --export --source Deadline
 
-    # Step 7: Save the CSV files
-    - name: Upload CSV exports
+    # Step 7: Copy exports into the data/ folder in the repo
+    - name: Copy exports to data folder
+      run: |
+        mkdir -p data
+        cp exports/*.csv data/
+
+    # Step 8: Commit and push the CSV files to the repo
+    - name: Commit and push updated data
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add data/
+        git diff --staged --quiet || git commit -m "Daily update: deadline articles $(date -u '+%Y-%m-%d')"
+        git push
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    # Step 9: Also keep the artifact as a backup (optional — delete this step if you don't want it)
+    - name: Upload CSV exports as artifact
       uses: actions/upload-artifact@v4
       with:
         name: deadline-articles
