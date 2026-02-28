@@ -1,9 +1,14 @@
 name: Simple Deadline Collector
 
 on:
-  schedule:
-    # Runs every day at 9:00 AM UTC
-    - cron: '0 9 * * *'
+  push:
+    branches: [ "main" ]
+    paths-ignore:
+      - 'data/**'
+  pull_request:
+    branches: [ "main" ]
+    paths-ignore:
+      - 'data/**'
 
   # Allows manual run from Actions tab
   workflow_dispatch:
