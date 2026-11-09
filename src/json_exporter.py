@@ -1,150 +1,157 @@
 """
-JSON Exporter for cumulative calendar-year article storage.
-Exports articles to a single articles.json file containing the full current year.
+JSON Exporter with monthly storage and a rolling recent window.
+
+Cloudflare Pages rejects any single file over 25 MiB. A full year of articles
+with full text runs to ~55 MB, so the data is stored as:
+
+  data/articles_YYYY-MM.json  one file per month (~6 MB each), the master record
+  data/articles.json          the last WINDOW_DAYS days, same shape as before,
+                              so anything reading that URL keeps working
+  data/index.json             list of monthly files with article counts
 """
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import Dict, List
+
+WINDOW_DAYS = 60
+# Stay well under Cloudflare Pages' 25 MiB per-file limit.
+MAX_FILE_BYTES = 24 * 1024 * 1024
 
 
 class JSONExporter:
-    """Exports articles to a cumulative JSON file, scoped to the current calendar year."""
+    """Writes monthly article files plus a rolling articles.json window."""
 
-    def __init__(self, output_path: str = "data/articles.json"):
+    def __init__(self, output_path: str = "data/articles.json", window_days: int = WINDOW_DAYS):
         self.output_path = Path(output_path)
-        self.output_path.parent.mkdir(parents=True, exist_ok=True)
+        self.data_dir = self.output_path.parent
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.window_days = window_days
         self.logger = logging.getLogger(__name__)
 
-    def _load_existing(self) -> List[Dict]:
-        """Load existing articles from JSON file if it exists."""
+    # ---------- helpers ----------
+
+    @staticmethod
+    def _date_key(article: Dict) -> str:
+        return article.get("date_collected") or article.get("publication_date") or ""
+
+    def _month_path(self, month: str) -> Path:
+        return self.data_dir / f"articles_{month}.json"
+
+    def _read_articles(self, path: Path) -> List[Dict]:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f).get("articles", [])
+        except (OSError, json.JSONDecodeError, AttributeError) as e:
+            self.logger.warning(f"Could not read {path}: {e}")
+            return []
+
+    def _write(self, path: Path, payload: Dict) -> None:
+        tmp = path.with_suffix(".json.tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        size = tmp.stat().st_size
+        if size > MAX_FILE_BYTES:
+            self.logger.warning(
+                f"{path.name} is {size / 1e6:.1f} MB, close to Cloudflare's 25 MiB limit"
+            )
+        tmp.replace(path)
+
+    def _load_existing(self) -> Dict[str, Dict]:
+        """Load every stored article (monthly files plus legacy/current articles.json), keyed by URL."""
+        by_url: Dict[str, Dict] = {}
+        sources = sorted(self.data_dir.glob("articles_????-??.json"))
         if self.output_path.exists():
-            try:
-                with open(self.output_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    return data.get('articles', [])
-            except (json.JSONDecodeError, KeyError) as e:
-                self.logger.warning(f"Could not load existing JSON: {e}. Starting fresh.")
-        return []
+            sources.append(self.output_path)
+        for path in sources:
+            for a in self._read_articles(path):
+                url = a.get("url")
+                if url and url not in by_url:
+                    by_url[url] = a
+        return by_url
+
+    # ---------- main ----------
 
     def export(self, articles: List[Dict]) -> str:
         """
-        Merge new articles into the cumulative JSON file.
-        Only includes articles from the current calendar year.
-        Deduplicates by URL.
-
-        Args:
-            articles: List of article dicts from the database
-
-        Returns:
-            Path to the output file
+        Merge new articles into monthly files, then rebuild articles.json as the
+        last WINDOW_DAYS days and refresh index.json.
         """
-        current_year = datetime.utcnow().year
+        now = datetime.utcnow()
+        stored = self._load_existing()
 
-        # Load what's already saved
-        existing = self._load_existing()
-        existing_urls = {a['url'] for a in existing}
-
-        # Filter and format new articles
         new_count = 0
+        touched_months = set()
         for article in articles:
-            url = article.get('url', '')
-            if not url or url in existing_urls:
+            url = article.get("url", "")
+            if not url or url in stored:
                 continue
-
-            # Parse date - use created_at (date collected) as primary
-            date_collected = article.get('created_at', '')
-            pub_date = article.get('publication_date', '')
-
-            # Determine the year to filter on
-            date_to_check = date_collected or pub_date
-            if date_to_check:
-                try:
-                    year = datetime.fromisoformat(date_to_check[:10]).year
-                    if year != current_year:
-                        continue
-                except ValueError:
-                    pass  # If we can't parse, include it
-
             entry = {
-                "title": article.get('title', ''),
+                "title": article.get("title", ""),
                 "url": url,
-                "date_collected": date_collected,
-                "publication_date": pub_date,
-                "source": article.get('source', ''),
-                "full_text": article.get('full_text', ''),
+                "date_collected": article.get("created_at", ""),
+                "publication_date": article.get("publication_date", ""),
+                "source": article.get("source", ""),
+                "full_text": article.get("full_text", ""),
             }
-
-            existing.append(entry)
-            existing_urls.add(url)
+            stored[url] = entry
             new_count += 1
+            touched_months.add(self._date_key(entry)[:7] or "unknown")
 
-        # Sort by date_collected descending (newest first)
-        existing.sort(
-            key=lambda x: x.get('date_collected') or x.get('publication_date') or '',
-            reverse=True
+        # Group everything by month.
+        months: Dict[str, List[Dict]] = {}
+        for a in stored.values():
+            months.setdefault(self._date_key(a)[:7] or "unknown", []).append(a)
+        for items in months.values():
+            items.sort(key=self._date_key, reverse=True)
+
+        # Write a monthly file when it is new, missing, or received articles this run.
+        stamp = now.isoformat() + "Z"
+        for month, items in months.items():
+            path = self._month_path(month)
+            if month in touched_months or not path.exists():
+                self._write(path, {
+                    "meta": {"month": month, "total_articles": len(items), "last_updated": stamp},
+                    "articles": items,
+                })
+
+        # Rolling window, same structure as the old articles.json.
+        cutoff = (now - timedelta(days=self.window_days)).strftime("%Y-%m-%d")
+        recent = sorted(
+            (a for a in stored.values() if self._date_key(a)[:10] >= cutoff),
+            key=self._date_key,
+            reverse=True,
         )
-
-        # Write output
-        output = {
+        self._write(self.output_path, {
             "meta": {
-                "year": current_year,
-                "total_articles": len(existing),
-                "last_updated": datetime.utcnow().isoformat() + "Z",
-                "new_this_run": new_count
+                "year": now.year,
+                "total_articles": len(recent),
+                "last_updated": stamp,
+                "new_this_run": new_count,
+                "window_days": self.window_days,
+                "window_start": cutoff,
+                "all_articles": len(stored),
+                "monthly_files": "index.json",
             },
-            "articles": existing
-        }
+            "articles": recent,
+        })
 
-        with open(self.output_path, 'w', encoding='utf-8') as f:
-            json.dump(output, f, ensure_ascii=False, indent=2)
+        # Index of monthly files.
+        self._write(self.data_dir / "index.json", {
+            "last_updated": stamp,
+            "total_articles": len(stored),
+            "recent_window": {"file": self.output_path.name, "days": self.window_days,
+                              "articles": len(recent)},
+            "months": [
+                {"month": m, "file": self._month_path(m).name, "articles": len(months[m])}
+                for m in sorted(months, reverse=True)
+            ],
+        })
 
         self.logger.info(
-            f"JSON export complete: {len(existing)} total articles "
-            f"({new_count} new) → {self.output_path}"
+            f"JSON export complete: {len(recent)} articles in {self.window_days}-day window, "
+            f"{len(stored)} total across {len(months)} monthly files ({new_count} new)"
         )
         return str(self.output_path)
-
-    def archive_year(self, year: int, archive_path: Optional[str] = None) -> str:
-        """
-        Copy current articles.json to a year archive file and clear the main file.
-
-        Args:
-            year: The year being archived
-            archive_path: Optional custom path for archive
-
-        Returns:
-            Path to the archive file
-        """
-        if archive_path is None:
-            archive_path = self.output_path.parent / f"articles_{year}.json"
-
-        archive_path = Path(archive_path)
-
-        if self.output_path.exists():
-            with open(self.output_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-
-            with open(archive_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-
-            self.logger.info(f"Archived {year} articles to {archive_path}")
-
-            # Clear main file for new year
-            empty = {
-                "meta": {
-                    "year": year + 1,
-                    "total_articles": 0,
-                    "last_updated": datetime.utcnow().isoformat() + "Z",
-                    "new_this_run": 0
-                },
-                "articles": []
-            }
-            with open(self.output_path, 'w', encoding='utf-8') as f:
-                json.dump(empty, f, ensure_ascii=False, indent=2)
-
-            self.logger.info(f"Cleared articles.json for {year + 1}")
-
-        return str(archive_path)

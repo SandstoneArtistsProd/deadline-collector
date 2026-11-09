@@ -1,0 +1,61 @@
+{
+  "last_updated": "2026-11-09T20:47:03.514334Z",
+  "total_articles": 8829,
+  "recent_window": {
+    "file": "articles.json",
+    "days": 60,
+    "articles": 2164
+  },
+  "months": [
+    {
+      "month": "2026-11",
+      "file": "articles_2026-11.json",
+      "articles": 323
+    },
+    {
+      "month": "2026-10",
+      "file": "articles_2026-10.json",
+      "articles": 1086
+    },
+    {
+      "month": "2026-09",
+      "file": "articles_2026-09.json",
+      "articles": 1049
+    },
+    {
+      "month": "2026-08",
+      "file": "articles_2026-08.json",
+      "articles": 1052
+    },
+    {
+      "month": "2026-07",
+      "file": "articles_2026-07.json",
+      "articles": 1047
+    },
+    {
+      "month": "2026-06",
+      "file": "articles_2026-06.json",
+      "articles": 1006
+    },
+    {
+      "month": "2026-05",
+      "file": "articles_2026-05.json",
+      "articles": 1040
+    },
+    {
+      "month": "2026-04",
+      "file": "articles_2026-04.json",
+      "articles": 1068
+    },
+    {
+      "month": "2026-03",
+      "file": "articles_2026-03.json",
+      "articles": 1108
+    },
+    {
+      "month": "2026-02",
+      "file": "articles_2026-02.json",
+      "articles": 50
+    }
+  ]
+}

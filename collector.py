@@ -240,7 +240,7 @@ def show_statistics(config: dict):
 
 def export_json(config: dict):
     """
-    Export articles to cumulative calendar-year JSON file.
+    Export monthly JSON files and the rolling articles.json window.
 
     Args:
         config: Configuration dictionary
@@ -277,7 +277,7 @@ def main():
     parser.add_argument(
         '--export-json',
         action='store_true',
-        help='Export articles to cumulative calendar-year JSON file'
+        help='Export monthly JSON files and the rolling articles.json window.
     )
     parser.add_argument(
         '--schedule',

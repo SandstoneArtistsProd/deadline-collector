@@ -43,24 +43,6 @@ jobs:
       run: |
         python collector.py --export-json
 
-    - name: Year-end archival (runs Dec 26)
-      run: |
-        python - <<'EOF'
-        import datetime, os, shutil, json
-        today = datetime.date.today()
-        if today.month == 12 and today.day == 26:
-            src = "data/articles.json"
-            if os.path.exists(src):
-                dst = f"data/articles_{today.year}.json"
-                shutil.copy(src, dst)
-                with open(src, "w") as f:
-                    json.dump({"meta": {"year": today.year + 1, "total_articles": 0,
-                                        "last_updated": datetime.datetime.utcnow().isoformat() + "Z",
-                                        "new_this_run": 0}, "articles": []}, f, indent=2)
-                print(f"Archived to {dst} and reset for {today.year + 1}")
-        else:
-            print("Not Dec 26, skipping archival.")
-        EOF
 
     - name: Copy CSV exports to data folder
       run: |
@@ -82,17 +64,3 @@ jobs:
       with:
         name: deadline-articles
         path: exports/*.csv
-
-    - name: Open archival notice issue (Dec 26 only)
-      if: ${{ github.event_name == 'schedule' }}
-      run: |
-        python - <<'EOF'
-        import datetime, subprocess
-        today = datetime.date.today()
-        if today.month == 12 and today.day == 26:
-            title = f"Year-End Archive Complete: articles_{today.year}.json saved"
-            body = f"articles.json archived to articles_{today.year}.json and reset for {today.year + 1}."
-            subprocess.run(["gh", "issue", "create", "--title", title, "--body", body], check=True)
-        EOF
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
