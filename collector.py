@@ -277,7 +277,7 @@ def main():
     parser.add_argument(
         '--export-json',
         action='store_true',
-        help='Export monthly JSON files and the rolling articles.json window.
+        help='Export monthly JSON files and the rolling articles.json window.'
     )
     parser.add_argument(
         '--schedule',
