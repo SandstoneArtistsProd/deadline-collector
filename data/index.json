@@ -1,16 +1,16 @@
 {
-  "last_updated": "2026-11-19T18:08:04.353694Z",
-  "total_articles": 9238,
+  "last_updated": "2026-11-20T17:41:07.935836Z",
+  "total_articles": 9272,
   "recent_window": {
     "file": "articles.json",
     "days": 60,
-    "articles": 2234
+    "articles": 2233
   },
   "months": [
     {
       "month": "2026-11",
       "file": "articles_2026-11.json",
-      "articles": 732
+      "articles": 766
     },
     {
       "month": "2026-10",
